@@ -30,6 +30,16 @@
 #include <pcl/common/time.h>
 #include <pcl/common/centroid.h>
 
+// OpenCV
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
+
+#include <opencv2/core.hpp>
+
+#include <image_transport/image_transport.h>
+#include <cv_bridge/cv_bridge.h>
+#include <sensor_msgs/image_encodings.h>
+
 // C Libraries
 #include <cmath>
 #include <string>
@@ -40,13 +50,17 @@
 
 using namespace std;
 
+// OpenCV Window Name
+static const std::string OPENCV_WINDOW = "Image window";
+
 typedef pcl::PointXYZRGB Point;
 typedef pcl::PointCloud<pcl::PointXYZRGB>::Ptr PointCloudPtr;
 typedef pcl::PointCloud<pcl::PointXYZRGB> PointCloud;
-typedef pcl::PointIndices::Ptr PointIndicesPtr;
+typedef pcl::PointIndices::Ptr IndicesPtr;
 typedef pcl::PointIndices Indices;
-typedef std::vector<pcl::PointIndices> PointIndicesVector;
+typedef std::vector<pcl::PointIndices> IndicesVector;
 typedef pcl::ExtractIndices<pcl::PointXYZRGB> ExtractIndices;
+typedef pcl::CentroidPoint<pcl::PointXYZRGB> Centroid;
 
 #define PI 3.14159265359
 
@@ -58,7 +72,7 @@ Point centerPoint; // cluster centroid
 // global, to see if new data to process arrived
 bool newData = false; 
 // This is a signal that the robot is in search mode (looking for a object in a circular motion)
-bool isSpinning = false;
+bool searchObject = false;
 // This is a signal that we have found an object we want to collide with it
 bool foundObject = false;
 // This is a signal that we are returning to center location after a collision attempt
@@ -82,10 +96,29 @@ void pointsCallback(const sensor_msgs::PointCloud2ConstPtr& input){
     pcl::fromROSMsg (*input, *cloudPtr); newData = true;	
 }
 
+ros::Publisher pub;
+
+void imageCallback(const sensor_msgs::ImageConstPtr& msg){
+   std_msgs::Header msgHeader = msg->header;
+   std::string frameId = msgHeader.frame_id.c_str();
+   ROS_INFO_STREAM("New Image from " << frameId);
+
+   cv_bridge::CvImagePtr cvPtr;
+   try
+   {
+     cvPtr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
+   }
+   catch (cv_bridge::Exception& e)
+   {
+     ROS_ERROR("cv_bridge exception: %s", e.what());
+     return;
+   }
+ }
+
 /* SEGMENTATION FUNCTIONS */
 
-PointIndicesPtr subsampleIndices(PointIndicesPtr indices, int fact){
-    PointIndicesPtr ret (new Indices);
+IndicesPtr subsampleIndices(IndicesPtr indices, int fact){
+    IndicesPtr ret (new Indices);
 	// sub sample indices from a given integer value i+=fact same as i=i+fact
     for(int i=0; i<indices->indices.size(); i+=fact){
         ret->indices.push_back(indices->indices[i]);
@@ -93,8 +126,8 @@ PointIndicesPtr subsampleIndices(PointIndicesPtr indices, int fact){
     return ret;
 }
 
-PointIndicesPtr invertIndices(PointIndicesPtr indices, int mx){
-    PointIndicesPtr ret (new Indices);
+IndicesPtr invertIndices(IndicesPtr indices, int mx){
+    IndicesPtr ret (new Indices);
     bool* hits = new bool[mx];
 	// init bool array with false values
     for(int i=0; i<mx; i++) hits[i] = false;
@@ -109,8 +142,8 @@ PointIndicesPtr invertIndices(PointIndicesPtr indices, int mx){
     return ret;
 }
 
-PointIndicesPtr intersectIndices(PointIndicesPtr indices1, PointIndicesPtr indices2){
-    PointIndicesPtr ret (new Indices);
+IndicesPtr intersectIndices(IndicesPtr indices1, IndicesPtr indices2){
+    IndicesPtr ret (new Indices);
     int mx = indices1->indices.size();
     int tmp = indices2->indices.size();
     if (tmp>mx) mx=tmp;
@@ -137,160 +170,72 @@ PointIndicesPtr intersectIndices(PointIndicesPtr indices1, PointIndicesPtr indic
 }
 
 /* get closest cluster index from given cluster indices and an input point cloud, we iterate over found clusters and choose closest returning the index */
-int getClosestCluster(PointIndicesVector clusterIndices, PointCloudPtr cloudNoPlane){
-	double smallestDistance = 1000000000;
+int getClosestCluster(IndicesVector clusterIndices, PointCloudPtr cloud){
 	int closestClusterId = -1;
-	Point centerPoint;
-	PointCloudPtr closestObject;
-	PointIndicesPtr ptr;
-	ExtractIndices extract;
+	double distance = 999999;
+	double centerP;
+	Point cp;
+	float avgR = 0 ; float avgG = 0; float avgB = 0;
+	float avgX = 0 ; float avgY = 0; float avgZ = 0;
+	Centroid centroid;
 
-	for (int i=0; i<clusterIndices.size(); i++) {
-		cout << "[CLUSTER]\tCluster "<< i << " has " << clusterIndices[i].indices.size() << " elements" << endl;
-		ptr = PointIndicesPtr(&clusterIndices[i]);
-		// extract cluster points to temporary cloud 'obj'
-		PointCloudPtr obj (new PointCloud);
-		extract.setInputCloud(cloudNoPlane);
-		extract.setIndices(ptr);
-		extract.setNegative(false);
-		extract.filter(*obj);
-		// compute centroid point of current temporary cloud
-		pcl::computeCentroid (*obj, centerPoint);
-		double distanceToCenter = sqrt(centerPoint.x * centerPoint.x + centerPoint.y * centerPoint.y * 0 + centerPoint.z * centerPoint.z);
-		cout << "[CLUSTER]\tCluster  " << i << " has distance " << distanceToCenter << endl;
-		if (distanceToCenter < smallestDistance){
-			closestClusterId = i;
-			smallestDistance = distanceToCenter;
-			closestObject = obj;
-		}
-		cout << "[CLUSTER]\tClosest cluster has index " << closestClusterId << endl;
+	if(cloud->size() != 0){
+		for (int i=0; i<clusterIndices.size(); i++) {
+			cout << "[CLUSTER]\tCluster "<< i << " has " << clusterIndices[i].indices.size() << " elements" << endl;
+			for (int pointId = 0; pointId < clusterIndices[i].indices.size(); pointId++) {
+				avgR += (*cloud)[pointId].r;
+				avgG += (*cloud)[pointId].g;
+				avgB += (*cloud)[pointId].b;
+				avgX += (*cloud)[pointId].x;
+				avgY += (*cloud)[pointId].y;
+				avgZ += (*cloud)[pointId].z;
+				centroid.add((*cloud)[pointId]);
+			}
+			centroid.get(cp); // Fetch centroid using `get()`
+			if(cp.x < 0) centerP = cp.x * -1;
+			else centerP = cp.x;
+			if(centerP < distance){
+				distance = cp.x;
+				closestClusterId = i;
+			}
+		}	
 	}
+	cout << "[CLUSTER]\tClosest cluster has index " << closestClusterId << " with x distance: " << distance << endl;
 	return closestClusterId;
 }
 
-// sub sampling method
-void extractCluster(PointCloudPtr cloud, PointCloudPtr filter, PointIndicesPtr indices, bool keepOrganized, bool setNegative){
-	ExtractIndices extract;
-	extract.setInputCloud(cloudPtr);
-	extract.setIndices(indices); // e.g. inlierIndices, outliersNanFiltered
-	extract.setKeepOrganized(false);
-	extract.setNegative(false);
-	extract.filter(*filter); // e.g. cloudNoPlane, cloudGroundPlane
-	cout << "[CLUSTER]\tSubsampled object cloud [size: " << filter->points.size() << "]" << endl;				
-}
-/* Euclidian Cluster Extraction
- * cloud is the original cloud obtained from sensors
- * 0.1, 100, 1000000 params
- */
-void euclideanClusterExt(PointCloudPtr cloud, PointIndicesVector clusterIndices, float tolerance, int min, int max){
-	if(cloudPtr->size() != 0){
-		/* Creating KDTree object for search method of extraction
-		 * performs clustering on remaining points, set upper/lower limits to disregard noise clusters.
-		 */
-		pcl::search::KdTree<pcl::PointXYZRGB>::Ptr kdTree (new pcl::search::KdTree<pcl::PointXYZRGB>);
-		/* Create ECE with point type XYZRGB, also setting params for extraction:
-		 * setClusterTolerance(), if small value, it can happen that actual object can be seen as multiple clusters, 
-		 * on the other hand if too high, that multiple objects are seen as one cluster.
-		 * We impose: clusters found have at least setMinClusterSize() points and maximum setMaxClusterSize() points.
-		 * Then extract cluster out of point cloud and save indices in clusterIndices
-		 */	
-		pcl::EuclideanClusterExtraction<pcl::PointXYZRGB> ece;
-		kdTree->setInputCloud(cloudPtr);
-
-		ece.setClusterTolerance(tolerance); // 0.1 corresponds to 10cm
-		ece.setMinClusterSize(min); // min size of cluster to extract e.g. 100
-		ece.setMaxClusterSize(max); // max size e.g. 1000000 (640x480 -> 307200)
-		ece.setSearchMethod(kdTree);
-		ece.setInputCloud(cloudPtr);
-		ece.extract(clusterIndices);
-	}
-}
-
-/* Cluster post processing
- * to separate each cluster out of PointIndices vector we have to iterate through clusterIndices,
- * we create a new PointCloud for each entry and write all points of the current cluster into this PointCloud object
- */
-
 /* Extraction of centroid & avg. RGB values of found cluster */
-void postProcessClusters(PointCloudPtr cloud, PointIndicesVector clusterIndices){
-	if(clusterIndices.size() > 0) {
-		for(int clusterId = 0 ; clusterId < clusterIndices.size(); clusterId++){
-			Indices &id = clusterIndices[clusterId];
-			float avgR = 0 ; float avgG = 0; float avgB = 0;
-			float avgX = 0 ; float avgY = 0; float avgZ = 0;
-			// For calculating center of point cloud
-			pcl::CentroidPoint<pcl::PointXYZRGB> centroid;
-			for (int pointId = 0; pointId < id.indices.size(); pointId++) {
-				avgR += (*cloud)[pointId].r ;
-				avgG += (*cloud)[pointId].g ;
-				avgB += (*cloud)[pointId].b ;
-				avgX += (*cloud)[pointId].x ;
-				avgY += (*cloud)[pointId].y ;
-				avgZ += (*cloud)[pointId].z ;
-				centroid.add((*cloud)[pointId]);
-			}
+void postProcessClusters(PointCloudPtr cloud, Indices closestIndices){
 
-			// Fetch centroid using `get()`
-			centroid.get(centerPoint);
-			cout << "[CLUSTER]\tCenter point coordinates [X: " << centerPoint.x << " Y: " 
-				<< centerPoint.y << " Z: " << centerPoint.z << "]" << endl;
-			avgR /= float(id.indices.size());
-			avgG /= float(id.indices.size()) ;
-			avgB /= float(id.indices.size());
-			avgX /= float(id.indices.size());
-			avgY /= float(id.indices.size());
-			avgZ /= float(id.indices.size());
-			cout << "[CLUSTER]\tID: " << clusterId << " Average RGB: " << (avgR+avgG+avgB)/3. << endl ;
-			/* Check if avg. RGB value over threshold to detect a color of clustered object
-			if((((avgR+avgG+avgB)/3.) > 130) && (fabs(avgX) < 0.1)) {
-				cout << "White!!!" << endl ;
-				looking_for_white = false;
-			}
-			*/
+	float avgR = 0 ; float avgG = 0; float avgB = 0;
+	float avgX = 0 ; float avgY = 0; float avgZ = 0;
+	// For calculating the center of a point cloud
+	Centroid centroid;
+	if(cloud->size() != 0){
+		for (int pointId = 0; pointId < closestIndices.indices.size(); pointId++) {
+			avgR += (*cloud)[pointId].r;
+			avgG += (*cloud)[pointId].g;
+			avgB += (*cloud)[pointId].b;
+			avgX += (*cloud)[pointId].x;
+			avgY += (*cloud)[pointId].y;
+			avgZ += (*cloud)[pointId].z;
+			centroid.add((*cloud)[pointId]);
 		}
+		// Fetch centroid using `get()`
+		centroid.get(centerPoint);
+		cout << "[CLUSTER]\tCenter point coordinate [X: " << centerPoint.x << " Y: " << centerPoint.y << " Z: " << centerPoint.z << "]" << endl;
+		// calculate avg. RGBXYZ values
+		avgR /= float(closestIndices.indices.size());
+		avgG /= float(closestIndices.indices.size());
+		avgB /= float(closestIndices.indices.size());
+		avgX /= float(closestIndices.indices.size());
+		avgY /= float(closestIndices.indices.size());
+		avgZ /= float(closestIndices.indices.size());
+		cout << "[CLUSTER]\tAverage RGB: " << (avgR+avgG+avgB)/3. << endl ;
 	}
-}
-/* Create a VoxelGrid filter and perform down sampling on the input cloud */
-void downSampler(PointCloudPtr cloud, PointCloudPtr cloudSmall){
-	pcl::VoxelGrid <pcl::PointXYZRGB> downSampler;
-	downSampler.setInputCloud(cloud);
-	downSampler.setLeafSize(0.04, 0.04, 0.04);
-	downSampler.filter(*cloudSmall); // result is saved in cloudSmall
-	std::cerr << "[POINT CLOUD]\tPoint cloud after filtering [size: "<< cloudSmall->points.size() << " height: " << cloudSmall->width*cloudSmall->height
-					<< " data points (" << pcl::getFieldsList (*cloudSmall) << ")]" << std::endl;
-}
-
-/* Setup model and method type for segmentation.
- * Distance threshold, determines how close a point must be to the model in order to be considered an inlier.
- * We use RANSAC as robust estimator of choice here with the goal of finding the ground plane and removing it.
- * The algorithm assumes that all of the data in a dataset is composed of both inliers and outliers.
- * 		Inliers: can be defined by a particular model with a specific set of parameters.
- *   	Outliers: if that model does not fit then it gets discarded.
- */
-void segmentCloud(PointCloudPtr cloud, PointIndicesPtr input, PointIndicesPtr inliers, PointIndicesPtr indices){
-	pcl::SACSegmentation<pcl::PointXYZRGB> seg;
-	while(true) {
-		pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
-		seg.setOptimizeCoefficients(true); // Optional
-		seg.setModelType(pcl::SACMODEL_PLANE);
-		seg.setMethodType(pcl::SAC_RANSAC);
-		// maybe tweak numbers here
-		seg.setDistanceThreshold(0.05);
-		seg.setMaxIterations(100);
-		seg.setInputCloud(cloudPtr);
-		seg.setIndices(input); // indices that represent the input cloud (e.g. outliers without NANs)
-		seg.segment(*inliers, *coefficients);
-		cout << "[CLUSTER]\tGround plane points: " << inliers->indices.size() << endl;
-
-		PointIndicesPtr outliers = invertIndices(inliers, 640*480); // Get outliers by swapping indices
-		cout << "[CLUSTER]\tNon ground plane points: " << outliers->indices.size() << endl;
-		input = intersectIndices(outliers, input);
-		// inliers: all indices on ground plane that are not NAN
-		if(((fabs(coefficients->values[1]) > 0.9)) && (inliers->indices.size()>30000)) {
-			input = intersectIndices(indices, outliers);
-			break;
-		}
-	}
+	/* Check if avg. RGB value over threshold to detect a color of clustered object
+	if((((avgR+avgG+avgB)/3.) > 130) && (fabs(avgX) < 0.1)) { ... }
+	*/
 }
 
 /* returns a geometry_msgs::Twist move command we can send to our bot */
@@ -307,6 +252,9 @@ int main(int argc, char** argv) {
     ros::NodeHandle nodeHandle; // Main access point for communication with ROS
 
     /* PUBLISHING TOPICS */
+ 	static const std::string IMAGE_TOPIC = "/camera/rgb/image_raw";
+ 	static const std::string PUBLISH_TOPIC = "/image_converter/output_video";
+	
 	ros::Publisher cloudPubPlane = nodeHandle.advertise<sensor_msgs::PointCloud2>("/plane", 1000);
 	ros::Publisher cloudPubGPlane = nodeHandle.advertise<sensor_msgs::PointCloud2>("/groundplane", 1000);
     ros::Publisher controlMotor = nodeHandle.advertise<kobuki_msgs::MotorPower>("/mobile_base/commands/motor_power", 1000);
@@ -319,59 +267,87 @@ int main(int argc, char** argv) {
     ros::Rate loopRate(10); // loop with with x Hz (10 Hz -> 10 main loop calls per sec)
     int count = 0; // simple counter that gets incremented every main loop access
     std::srand(std::time(NULL)); // random seed gen
-	// Twist object for moving the robot
-    geometry_msgs::Twist moveCommand;
+
+	pcl::SACSegmentation<pcl::PointXYZRGB> seg;
 	Point centerPoint; // cluster object centroid
-	bool searchObject = true; // init state search object when program starts
+
 	bool visited[8]; // bool array for equally distributing push attempts on each object
+	int angles[8]; // array to hold angles for each object
+	double currentAngle; // current heading of robot
+	bool locatedObject; // has pulled a magic number and is turning to destination point
+	double relativeAngle, angularSpeed;
+	int magic;
 
     while(ros::ok()) {
-
         if(count==0) { // Start motor
             kobuki_msgs::MotorPower mPower;
             mPower.state = mPower.ON;
             controlMotor.publish(mPower); 
 			for(int i = 0; i < 8; i++) visited[i] = false;
+			for(int i = 0; i < 8; i++) angles[i] = 45 * i;
+			currentAngle = 0;
+			searchObject = true; locatedObject = false;
         }
-
 		/* Routine after colission/bump with an object */
 		if(receivedBump) {
-            std::cout << "[INFO]\tCOLISSION - DETECTED A BUMP!" << std::endl;
-			moveCommand = moveBot(0, 0, 0, 0, 0 ,0); // STOP ROBOT	
+			foundObject = false;
+			geometry_msgs::Twist moveCommand = moveBot(0, 0, 0, 0, 0 ,0); // STOP ROBOT	
 			controlRobot.publish(moveCommand);
-		    // COLLISION ROUTINE HERE
-			// TO-DO
-            receivedBump = false;	
-        } 
-
-		/* Routine if robot is looking for a pointcloud to target */
-		if(isSpinning){	
-			// MAYBE if(count%(10*16)==0){ ... } if sleep does not work
-			cout << "[INFO]\tSEARCHING FOR OBJECT..." << endl;		
-			// TO-DO: 8 objects * 2 seconds = 16 seconds for a full turn, stop after 1 second if we got that magic number pulled
-     		// float angularZ = 2. * PI / 10
-			int magic = rand()%7;
-			visited[magic] = true;
-			double speed = 22.5; // degrees/sec
-			double angle = 45*magic; // degrees
-
-			// conversion from angle to radians
-			double angularSpeed = speed * 2. * PI / 360;
-			double relativeAngle = angle * 2. * PI / 360;
-
-			double t0 = ros::Time::now().toSec(); // set current time
-			double currentAngle = 0;
-			
-			while(currentAngle < relativeAngle){
-				moveCommand = moveBot(0, 0, 0, 0, 0, abs(angularSpeed));
+			std::cout << "[BUMPER]\tCOLISSION - DETECTED A BUMP!" << std::endl;
+			int pushCount = 0;    
+			while(true){ // 3 seconds push
+				pushCount++;
+				moveCommand.linear.x = 0.1;
 				controlRobot.publish(moveCommand);
-				double t1 = ros::Time::now().toSec();
-				currentAngle = angularSpeed*(t1-t0);
+				
+				// COLLISION ROUTINE HERE TO-DO
+				
+				if(pushCount == 30) {
+					break; receivedBump = false; 
+				} 
 			}
-			moveCommand.angular.z = 0;
+            
+        } 
+		/* Routine if robot is looking for a pointcloud to target */
+		if(searchObject){		
+			if(!locatedObject){
+				std::cout << "[INFO]\tSEARCHING FOR OBJECT..." << endl;			
+				// check and reset visited array if all have been visited
+				int vc = 0;
+				for(int i = 0; i < 8; i++) if(visited[i] == false) vc++;		
+				if (vc == 0) for(int i = 0; i < 8; i++) visited[i] == true;
+				// generate random target number
+				magic = rand()%7;
+				while(visited[magic]) magic = rand()%7;
+				double speed = 22.5; // degrees/sec
+				double dif = currentAngle / 2. / PI * 360;
+				// set angle we want to hit 
+				double angle;
+				if(dif > angles[magic]) angle = dif - angles[magic]; 
+				else angle = angles[magic] - dif; 
+				// conversion from angle to radians
+				angularSpeed = speed * 2. * PI / 360;
+				relativeAngle = angle * 2. * PI / 360;
+				std::cout << "[INFO]\tTargeted object: " << magic << " Rel. angle: " << relativeAngle << " Cur. angle: " << currentAngle << " Angular spd: " << angularSpeed << endl;
+				locatedObject = true;
+			}
+
+
+			geometry_msgs::Twist moveCommand;
+			moveCommand.linear.x = moveCommand.linear.y = moveCommand.linear.z = 0;
+			moveCommand.angular.x = moveCommand.angular.y = moveCommand.angular.z = 0;
+			//moveCommand.angular.z = abs(angularSpeed);
+			moveCommand.angular.z = abs(angularSpeed);   
 			controlRobot.publish(moveCommand);
-			ros::Duration(16).sleep();
-			isSpinning = false;	
+			if(count==160) std::cout << "16 sec, 22,5 deg/sec" << endl;
+
+			// STOP after angle hit
+			if(count==160){
+				geometry_msgs::Twist moveCommand = moveBot(0,0,0,0,0,0);
+				controlRobot.publish(moveCommand);
+				visited[magic] = true;
+				searchObject = false;	
+			}
     	} 
 
 		/* Routine for found object we want to navigate to */
@@ -380,11 +356,13 @@ int main(int argc, char** argv) {
 			// TO-DO  cloud still small, so probably not near / in front of object, do turning
 			// check cloud size and if certain threshold is reached, just go with a full linear speed
 			if(centerPoint.x > 0.2){	
-				moveCommand = moveBot(0.1, 0, 0, 0, 0, -0.25);
+				moveCommand.angular.z = -0.2;
+				moveCommand.linear.x = 0.1;
 			} else if(centerPoint.x < -0.2){
-				moveCommand = moveBot(0.1, 0, 0, 0, 0, 0.25);
+				moveCommand.angular.z = 0.2;
+				moveCommand.linear.x = 0.1;
 			} else {
-				moveCommand = moveBot(0.5, 0, 0, 0, 0, 0); // pedal to the metal
+				moveCommand.linear.x = 0.2; // pedal to the metal
 			}
 			controlRobot.publish(moveCommand);
         }
@@ -403,56 +381,128 @@ int main(int argc, char** argv) {
 
 		/* PCL part here */
         if(newData && foundObject){ // wait for new data from pointcloud callback!
-				cout << "\n" << endl;
-				/* START FILTERING HERE */
-				std::cerr << "[POINT CLOUD]\tUnprocessed point cloud [size: "<< cloudPtr->size() <<  " height: " << cloudPtr->height 
-					<< " width: " << cloudPtr->width << "dimension: " << cloudPtr->width*cloudPtr->height << "]" << std::endl;
-				/* NAN FILTERING */
-				vector<int> indices(0);
-				pcl::removeNaNFromPointCloud(*cloudPtr, indices);
-				PointIndicesPtr indicesPtr (new Indices());
-				indicesPtr->indices = indices; // indices after NaN filtering
-				//cout << "[POINT CLOUD]\tPoint cloud has " << indices.size() << " points after NAN elimination" << endl;
-				//cout << "[POINT CLOUD]\tORGANIZED: " << cloudPtr->isOrganized() << endl;
+			/* START FILTERING HERE */
+			std::cerr << "\n[POINT CLOUD]\tUnprocessed point cloud [size: "<< cloudPtr->size() <<  " height: " << cloudPtr->height 
+				<< " width: " << cloudPtr->width << "]" << std::endl;
 
-				/* SEGMENTATION */
-				PointIndicesPtr outliersNotNaN = indicesPtr;
-				PointIndicesPtr inliers (new Indices);
-				segmentCloud(cloudPtr, outliersNotNaN, inliers, indicesPtr);
+			/* DOWN SAMPLING 
+			 * Create a VoxelGrid filter and perform down sampling on the input cloud 
+			 */
+			/*
+			pcl::VoxelGrid <pcl::PointXYZRGB> downSampler;
+			downSampler.setInputCloud(cloudPtr);
+			downSampler.setLeafSize(0.04, 0.04, 0.04);
+			downSampler.filter(*cloudPtrSmall); // result is saved in cloudSmall
+			std::cerr << "[POINT CLOUD]\tPoint cloud after filtering [size: "<< cloudPtrSmall->points.size() << " height: " << cloudPtrSmall->width*cloudPtrSmall->height
+						<< " data points (" << pcl::getFieldsList (*cloudPtrSmall) << ")]" << std::endl;
+			*/
 
-				// outliersNotNaN corresponds to all points except ground plane points
-				// all other planes are still there, only ground removed so far
-				PointIndicesPtr outliersNotNaNSubsample = subsampleIndices(outliersNotNaN, 4);
-				// remove ground plane and store in cloudNoPlane
-				PointCloudPtr cloudNoPlane (new PointCloud);
-				PointCloudPtr cloudGroundPlane (new PointCloud); // ground plane cloud
-				extractCluster(cloudPtr, cloudNoPlane, outliersNotNaNSubsample, false, false);
+			/* NAN FILTERING */
+			vector<int> indices(0);
+    		pcl::removeNaNFromPointCloud(*cloudPtr, indices);
 
-				/* EUCLIDEAN CLUSTER EXTRACTION 
-				 * Vector contains actual index info, indices of each detected cluster are saved here, 
-				 * contains one instance of PointIndices for each detected cluster
-				 * clusterIndices[0] for first cluster in point cloud, and so on
-				 */
-				PointIndicesVector clusterIndices;
-				euclideanClusterExt(cloudPtr, clusterIndices, 0.1, 100, 1000000);
+    		IndicesPtr indicesPtr (new pcl::PointIndices());
+    		indicesPtr->indices = indices;
+    		IndicesPtr outliersNotNaN = indicesPtr;
+    		IndicesPtr inliers (new pcl::PointIndices);
+			//cout << "[POINT CLOUD]\tPoint cloud has " << indices.size() << " points after NAN elimination" << endl;
+			//cout << "[POINT CLOUD]\tORGANIZED: " << cloudPtr->isOrganized() << endl;
 
-				/* PCL TO ROS CONVERSION FOR PUBLISHING */
-				pcl::PCLPointCloud2 conv1;
-				pcl::PCLPointCloud2 conv2;
-				sensor_msgs::PointCloud2 toROS1;
-				sensor_msgs::PointCloud2 toROS2;
-				// plane points to PCL2 format
-				pcl::toPCLPointCloud2(*cloudNoPlane, conv1);
-				pcl::toPCLPointCloud2(*cloudGroundPlane, conv2);
-				// conversion to ROS sensor_msg
-				pcl_conversions::fromPCL(conv1, toROS1);
-				pcl_conversions::fromPCL(conv2, toROS2);		
-				// publishing results here
-				cloudPubPlane.publish(toROS1);
-				cloudPubGPlane.publish(toROS2);
-				newData = false; // done processing point clouds
+			/* Setup model and method type for segmentation.
+			* Distance threshold, determines how close a point must be to the model in order to be considered an inlier.
+			* We use RANSAC as robust estimator of choice here with the goal of finding the ground plane and removing it.
+			* The algorithm assumes that all of the data in a dataset is composed of both inliers and outliers.
+			* 		Inliers: can be defined by a particular model with a specific set of parameters.
+			*   	Outliers: if that model does not fit then it gets discarded.
+			*/
+			while(true) {
+				pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
+				seg.setOptimizeCoefficients(true); // Optional
+				seg.setModelType(pcl::SACMODEL_PLANE);
+				seg.setMethodType(pcl::SAC_RANSAC);
+
+				/* MAYBE TWEAK NUMBERS HERE */
+				seg.setDistanceThreshold(0.05);
+				seg.setMaxIterations(100);
+
+				seg.setInputCloud(cloudPtr);
+				seg.setIndices(outliersNotNaN); // indices that represent the input cloud (without NANs)
+				seg.segment(*inliers, *coefficients);
+
+				cout << "[CLUSTER]\tGround plane points: " << inliers->indices.size() << endl;
+				pcl::PointIndices::Ptr outliers = invertIndices(inliers, 640*480); // Get outliers by swapping indices
+				cout << "[CLUSTER]\tNon ground plane points: " << outliers->indices.size() << endl;
+				outliersNotNaN = intersectIndices(outliers, outliersNotNaN);
+
+				// Inliers: all indices on ground plane that are not NAN
+				if(((fabs(coefficients->values[1]) > 0.9)) && (inliers->indices.size()>30000)) {
+					outliersNotNaN = intersectIndices(indicesPtr, outliers);
+					break;
+				}
+			}
+
+			// outliers_not_NAN corresponds to all points except ground plane points
+			// all other planes are still there, only one plane removed so far
+			pcl::PointIndices::Ptr outliersNotNaNSubSample = subsampleIndices(outliersNotNaN, 4);
+			// remove ground plane and store in cloud_noplane
+			pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudNoPlane (new pcl::PointCloud<pcl::PointXYZRGB>);
+
+			pcl::ExtractIndices<pcl::PointXYZRGB> extract;
+    		extract.setInputCloud(cloudPtr);
+    		extract.setIndices(outliersNotNaNSubSample);
+    		extract.setKeepOrganized(false);
+    		extract.setNegative(false);
+    		extract.filter(*cloudNoPlane);
+    		cout << "[POINT CLOUD]\tSUBSAMPLED OBJECT CLOUD (cloudNoPlane), WITH SIZE: " << cloudNoPlane->points.size() << endl;
+
+			/* CLUSTERING
+			 * Creating KDTree object for search method of extraction
+			 * performs clustering on remaining points, set upper/lower limits to disregard noise clusters.
+			 */
+			IndicesVector clusterIndices;
+			pcl::search::KdTree<pcl::PointXYZRGB>::Ptr kdTree (new pcl::search::KdTree<pcl::PointXYZRGB>);
+			if(cloudNoPlane->size() != 0) 
+				kdTree->setInputCloud(cloudNoPlane);
+			/* Create ECE with point type XYZRGB, also setting params for extraction
+			* setClusterTolerance(), if small value, it can happen that actual object can be seen
+			* as multiple clusters, on the other hand if too high, that multiple objects are seen as one cluster.
+			* We impose: clusters found have at least setMinClusterSize() points and maximum setMaxClusterSize() points.
+			* Then extract cluster out of point cloud and save indices in cluster_indices
+			*/		
+			pcl::EuclideanClusterExtraction<pcl::PointXYZRGB> ec;
+			ec.setClusterTolerance(0.1); // 10cm
+			ec.setMinClusterSize(100);
+			ec.setMaxClusterSize(1000000);
+			ec.setSearchMethod(kdTree);
+			ec.setInputCloud(cloudNoPlane);
+			ec.extract(clusterIndices);
+
+			if(clusterIndices.size() > 0)
+				cout << "[CLUSTER]\tFOUND CLUSTERS: " << clusterIndices.size() << endl;
+			
+			/* CLUSTER PROCESSING
+			 * To separate each cluster out of vector<PointIndices> we have to iterate through cluster_indices,
+			 * create a new PointCloud for each entry and write all points of the current cluster in the PointCloud.
+			 */
+			int closestClusterId = getClosestCluster(clusterIndices, cloudNoPlane);
+			postProcessClusters(cloudNoPlane, clusterIndices[closestClusterId]);
+
+			/* PCL TO ROS CONVERSION FOR PUBLISHING */
+			pcl::PCLPointCloud2 conv1;
+			//pcl::PCLPointCloud2 conv2;
+			sensor_msgs::PointCloud2 toROS1;
+			//sensor_msgs::PointCloud2 toROS2;
+			// plane points to PCL2 format
+			pcl::toPCLPointCloud2(*cloudNoPlane, conv1);
+			//pcl::toPCLPointCloud2(*cloudGroundPlane, conv2);
+			// conversion to ROS sensor_msg
+			pcl_conversions::fromPCL(conv1, toROS1);
+			//pcl_conversions::fromPCL(conv2, toROS2);		
+			// publishing results here
+			cloudPubPlane.publish(toROS1);
+			//cloudPubGPlane.publish(toROS2);
+			newData = false; // done processing point clouds
         }
-
         ros::spinOnce(); // process single round of callbacks
         loopRate.sleep();
         ++count;

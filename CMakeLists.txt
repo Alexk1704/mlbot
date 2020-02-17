@@ -11,8 +11,10 @@ find_package(PCL 1.7)
 
 find_package(catkin REQUIRED COMPONENTS
   roscpp
+  cv_bridge
   rospy
   std_msgs
+  sensor_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -105,10 +107,8 @@ find_package(catkin REQUIRED COMPONENTS
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES mlbot_controller
-#  CATKIN_DEPENDS roscpp rospy std_msgs
-#  DEPENDS system_lib
+  #INCLUDE_DIRS
+  #CATKIN_DEPENDS roscpp rospy std_msgs cv_bridge image_transport
 )
 
 ###########
@@ -121,6 +121,7 @@ include_directories(
 # include
   ${catkin_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
@@ -155,6 +156,7 @@ target_link_libraries(${PROJECT_NAME}_node
    ${PCL_IO_LIBRARIES} 
    ${PCL_FILTERS_LIBRARIES} 
    ${PCL_SEGMENTATION_LIBRARIES}
+   ${OpenCV_INCLUDE_DIRS}
 )
 
 #############
