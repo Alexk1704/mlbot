@@ -25,6 +25,9 @@ Launch TurtleBot2 Sim with Gazebo:
 Start RViz:
 	$ roslaunch turtlebot_rviz_launchers view_robot.launch
 
+Teleop:
+	$ roslaunch turtlebot_teleop keyboard_teleop.launch
+
 Start this node after build:
 	$ rosrun mlbot mlbot_node
 	
