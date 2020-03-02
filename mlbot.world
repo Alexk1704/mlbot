@@ -1292,12 +1292,12 @@
       </link>
       <pose frame=''>0.000838 0.053776 0 0 -0 0</pose>
     </model>
-    <state world_name='default'>
+    <state world_name='ml bot world'>
       <sim_time>4880 240000000</sim_time>
       <real_time>1737 616013062</real_time>
       <wall_time>1582884856 174737265</wall_time>
       <iterations>173685</iterations>
-      <model name='cardboard_box'>
+      <model name='cardboard_box_0'>
         <pose frame=''>-3 0 0.149 0 -0 1.6</pose>
         <scale>1 1 1</scale>
         <link name='link'>
@@ -1307,7 +1307,7 @@
           <wrench>3e-06 0 0 0 -0 0</wrench>
         </link>
       </model>
-      <model name='cardboard_box_0'>
+      <model name='cardboard_box_1'>
         <pose frame=''>0 -3 0.149 0 -0 0.006462</pose>
         <scale>1 1 1</scale>
         <link name='link'>
@@ -1317,7 +1317,7 @@
           <wrench>0 -3e-06 0 0 -0 0</wrench>
         </link>
       </model>
-      <model name='cardboard_box_clone'>
+      <model name='cardboard_box_2'>
         <pose frame=''>-0.00931 3.00896 0.149 0 -0 0</pose>
         <scale>1 1 1</scale>
         <link name='link'>
@@ -1327,7 +1327,7 @@
           <wrench>0 3e-06 0 0 -0 0</wrench>
         </link>
       </model>
-      <model name='cardboard_box_clone_0'>
+      <model name='cardboard_box_3'>
         <pose frame=''>3 0 0.149 0 -0 1.6</pose>
         <scale>1 1 1</scale>
         <link name='link'>
@@ -1379,7 +1379,7 @@
           <wrench>-9.7e-05 -4.8e-05 0.00721 0 -0 0</wrench>
         </link>
       </model>
-      <model name='purplebox_push'>
+      <model name='purplebox_push_0'>
         <pose frame=''>2.25 -2.25 0.2 0 -0 0.799901</pose>
         <scale>1 1 1</scale>
         <link name='link_1'>
@@ -1389,7 +1389,7 @@
           <wrench>0 -1.6e-05 0 0 -0 0</wrench>
         </link>
       </model>
-      <model name='purplebox_push_2'>
+      <model name='purplebox_push_1'>
         <pose frame=''>2.25 2.25 0.2 0 -0 0.799986</pose>
         <scale>1 1 1</scale>
         <link name='link_1'>
@@ -1399,7 +1399,7 @@
           <wrench>1.6e-05 0 0 0 -0 0</wrench>
         </link>
       </model>
-      <model name='purplebox_push_3'>
+      <model name='purplebox_push_2'>
         <pose frame=''>-2.25 2.25 0.2 0 -0 0.799957</pose>
         <scale>1 1 1</scale>
         <link name='link_1'>
@@ -1409,7 +1409,7 @@
           <wrench>0 1.6e-05 0 0 -0 0</wrench>
         </link>
       </model>
-      <model name='purplebox_push_4'>
+      <model name='purplebox_push_3'>
         <pose frame=''>-2.25 -2.25 0.2 0 -0 0.799931</pose>
         <scale>1 1 1</scale>
         <link name='link_1'>
@@ -1430,7 +1430,7 @@
         <projection_type>perspective</projection_type>
       </camera>
     </gui>
-    <model name='cardboard_box'>
+    <model name='cardboard_box_0'>
       <pose frame=''>-2.51072 -0.194265 0.15 0 -0 0</pose>
       <link name='link'>
         <inertial>
@@ -1486,7 +1486,7 @@
         <gravity>1</gravity>
       </link>
     </model>
-    <model name='cardboard_box_0'>
+    <model name='cardboard_box_1'>
       <pose frame=''>-0.379681 -2.23946 0.15 0 -0 0</pose>
       <link name='link'>
         <inertial>
@@ -1542,7 +1542,7 @@
         <gravity>1</gravity>
       </link>
     </model>
-    <model name='cardboard_box_clone'>
+    <model name='cardboard_box_2'>
       <pose frame=''>0.785023 2.55562 0.14974 3e-06 -2e-06 0</pose>
       <link name='link'>
         <inertial>
@@ -1598,7 +1598,7 @@
         <gravity>1</gravity>
       </link>
     </model>
-    <model name='cardboard_box_clone_0'>
+    <model name='cardboard_box_3'>
       <pose frame=''>3 0 0.14974 3e-06 -2e-06 0</pose>
       <link name='link'>
         <inertial>
@@ -1654,7 +1654,7 @@
         <gravity>1</gravity>
       </link>
     </model>
-    <model name='purplebox_push'>
+    <model name='purplebox_push_0'>
       <link name='link_1'>
         <pose frame=''>0 0 0 0 -0 0</pose>
         <inertial>
@@ -1756,7 +1756,7 @@
       <allow_auto_disable>1</allow_auto_disable>
       <pose frame=''>2.02859 -2.04561 0 0 -0 0</pose>
     </model>
-    <model name='purplebox_push_2'>
+    <model name='purplebox_push_1'>
       <link name='link_1'>
         <pose frame=''>0 0 0 0 -0 0</pose>
         <inertial>
@@ -1858,7 +1858,7 @@
       <allow_auto_disable>1</allow_auto_disable>
       <pose frame=''>2.45362 1.78877 0 0 -0 0</pose>
     </model>
-    <model name='purplebox_push_3'>
+    <model name='purplebox_push_2'>
       <link name='link_1'>
         <pose frame=''>0 0 0 0 -0 0</pose>
         <inertial>
@@ -1960,7 +1960,7 @@
       <allow_auto_disable>1</allow_auto_disable>
       <pose frame=''>-1.61316 2.26276 0 0 -0 0</pose>
     </model>
-    <model name='purplebox_push_4'>
+    <model name='purplebox_push_3'>
       <link name='link_1'>
         <pose frame=''>0 0 0 0 -0 0</pose>
         <inertial>

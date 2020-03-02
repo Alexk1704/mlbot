@@ -1,0 +1,15 @@
+    material Ceiling/Image
+            {
+              technique
+              {
+                pass
+                {
+                  texture_unit
+                  {
+                    texture ceiling.png
+                  }
+                }
+              }
+            }
+
+
