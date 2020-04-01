@@ -28,7 +28,7 @@ TESTED AND WORKING ON: Ubuntu 16.04.6 LTS Xenial, using ROS kinetic 1.12.14, PCL
     $ sudo apt-get install ros-kinetic-turtlebot* ros-kinetic-kobuki* ros-kinetic-gazebo*
 
 **!!! IMPORTANT INFO !!!** 
-You need to copy the .gazebo/ folder located in this repository into your gazebo installation folder usually located at _~/.gazebo/_ to add the custom models needed for this simulation. Also two urdf files important for the construction of turtlebot model used in the gazebo simulator need to be replaced. These files can be found in the ROS installation path usually located at _/opt/ros/kinetic/share/turtlebot_description/urdf/_  replace the folder _sensors/_ with the custom one from _./custom/sensors/_ and also replace the default file _turtlebot_gazebo.urdf.xacro_ with the one from _./custom/_.
+You need to copy the _.gazebo/_ folder located in this repository into your gazebo installation folder usually located at _~/.gazebo/_ to add the custom models needed for this simulation. Also two urdf files important for the construction of turtlebot model used in the gazebo simulator need to be replaced. These files can be found in the ROS installation path usually located at _/opt/ros/kinetic/share/turtlebot_description/urdf/_ replace the folder _sensors/_ with the custom one from _./custom/sensors/_ and also replace the default file _"turtlebot_gazebo.urdf.xacro"_ with the one from the _./custom_ folder.
 
 ##### Creating a catkin workspace, copy the project wherever it is located into the src folder and build it
     $ mkdir -p ~/catkin_ws/src
